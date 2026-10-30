@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tiles &amp; Tea</title>
+  <meta name="description" content="A two-player word game for the family, played from your own phones.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Zilla+Slab:wght@600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="masthead">
+      <h1>Tiles <span>&amp;</span> Tea</h1>
+      <p id="mode" class="mode" hidden>Test mode: games are saved in this browser only. Add your Supabase settings to play across devices.</p>
+    </header>
+
+    <section id="setup" class="panel setup" hidden>
+      <h2>Start a new game</h2>
+      <p>Enter both names. You'll get a link to send to the other player.</p>
+      <form id="setup-form">
+        <label for="name-me">Your name</label>
+        <input id="name-me" maxlength="24" autocomplete="given-name" required>
+        <label for="name-them">The other player's name</label>
+        <input id="name-them" maxlength="24" required>
+        <button id="setup-go" class="primary" type="submit">Start the game</button>
+        <p id="setup-error" class="error-text" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="error" class="panel" hidden>
+      <h2>Game not found</h2>
+      <p id="error-text"></p>
+      <a class="button primary" href="./">Start a new game</a>
+    </section>
+
+    <section id="game" hidden>
+      <div class="scoreboard">
+        <div id="player-1" class="player"><span class="name"></span><span class="score">0</span></div>
+        <div class="middle">
+          <p id="turn" class="turn"></p>
+          <p id="bag-count" class="bag"></p>
+        </div>
+        <div id="player-2" class="player"><span class="name"></span><span class="score">0</span></div>
+      </div>
+
+      <div class="board-frame">
+        <div id="board" class="board"></div>
+      </div>
+
+      <div class="tray">
+        <div id="rack" class="rack" aria-label="Your tiles"></div>
+        <p id="msg" class="msg" role="status" aria-live="polite"></p>
+        <div class="controls">
+          <button id="play" class="primary wide" type="button">Play</button>
+          <button id="swap-go" class="primary wide" type="button" hidden>Swap</button>
+          <button id="recall" type="button">Recall</button>
+          <button id="shuffle" type="button">Shuffle</button>
+          <button id="swap" type="button">Swap tiles</button>
+          <button id="pass" type="button">Pass</button>
+        </div>
+      </div>
+
+      <details id="invite" class="panel invite">
+        <summary>Game links</summary>
+        <label for="invite-link">Send this link to <strong id="invite-name"></strong></label>
+        <div class="copy-row"><input id="invite-link" readonly><button id="copy-invite" type="button">Copy</button></div>
+        <label for="own-link">Your own link (bookmark it to come back)</label>
+        <div class="copy-row"><input id="own-link" readonly><button id="copy-own" type="button">Copy</button></div>
+      </details>
+
+      <section class="panel">
+        <h2>Moves</h2>
+        <p id="log-empty" class="muted">No moves yet. The first word must cover the star in the middle.</p>
+        <ol id="log" class="log"></ol>
+      </section>
+    </section>
+  </main>
+
+  <div id="picker" class="picker" hidden role="dialog" aria-modal="true" aria-labelledby="picker-title">
+    <div class="picker-card">
+      <h2 id="picker-title">Which letter is your blank?</h2>
+      <div id="picker-grid" class="picker-grid"></div>
+      <button id="picker-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+</body>
+</html>
