@@ -9,6 +9,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Zilla+Slab:wght@600;700&display=swap">
   <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Tiles &amp; Tea">
+  <meta name="theme-color" content="#22574c">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
@@ -64,6 +69,14 @@
           <button id="pass" type="button">Pass</button>
         </div>
       </div>
+
+      <section id="alerts" class="panel alerts" hidden>
+        <div class="alerts-row">
+          <p id="alerts-text"></p>
+          <button id="alerts-on" type="button">Turn on notifications</button>
+        </div>
+        <button id="nudge" type="button" hidden>Nudge</button>
+      </section>
 
       <details id="invite" class="panel invite">
         <summary>Game links</summary>

@@ -247,6 +247,11 @@ label { font-weight: 700; }
 .ghost .tile .ltr { font-size: 58cqw; }
 .ghost .tile .val { font-size: 24cqw; }
 
+/* ---------- notifications ---------- */
+.alerts-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.alerts-row p { flex: 1 1 14rem; min-width: 0; }
+#nudge { width: 100%; }
+
 /* ---------- links and log ---------- */
 .invite summary { font-weight: 700; cursor: pointer; }
 .invite[open] summary { margin-bottom: 4px; }

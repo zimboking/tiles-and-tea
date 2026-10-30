@@ -21,6 +21,7 @@ function supabaseStore({ supabaseUrl, supabaseKey }) {
 
   return {
     online: true,
+    client,
     async create(state) {
       const id = newId();
       const { error } = await client.from(TABLE).insert({ id, state, version: 1 });

@@ -1,0 +1,12 @@
+{
+  "name": "Tiles & Tea",
+  "short_name": "Tiles & Tea",
+  "description": "A two-player word game for the family.",
+  "display": "standalone",
+  "background_color": "#111a17",
+  "theme_color": "#22574c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

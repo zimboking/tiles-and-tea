@@ -1,6 +1,7 @@
-// Optional word check. If the list can't load, every word is allowed.
+// Optional word check against the Australian English SCOWL list (size 80, see words-LICENSE.txt).
+// If the list can't load, every word is allowed.
 
-const WORD_LIST_URL = 'https://cdn.jsdelivr.net/npm/word-list@4.0.0/words.txt';
+const WORD_LIST_URL = 'words-au.txt';
 
 let words = null;
 let loading = null;

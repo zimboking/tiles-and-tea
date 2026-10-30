@@ -5,6 +5,11 @@ import {
 import { createStore } from './store.js';
 import { loadDictionary, unknownWords } from './dictionary.js';
 import { CONFIG } from './config.js';
+import {
+  pushSupported, isIos, isHomeScreenApp, pushEnabledHere, registerWorker, enablePush, notify,
+} from './push.js';
+
+const LAST_GAME_KEY = 'tiles-and-tea:last-game';
 
 const PREMIUM_LABELS = { T: 'TW', D: 'DW', t: 'TL', d: 'DL', '*': '★' };
 const PREMIUM_CLASSES = { T: 'tw', D: 'dw', t: 'tl', d: 'dl', '*': 'dw' };
@@ -172,12 +177,76 @@ function renderInvite() {
   if (params.get('new') === '1') $('invite').open = true;
 }
 
+function renderAlerts() {
+  const canPush = store.online && CONFIG.vapidPublicKey;
+  $('alerts').hidden = !canPush;
+  if (!canPush) return;
+  const button = $('alerts-on');
+  const text = $('alerts-text');
+  const opponent = nameOf(other(seat));
+  if (pushEnabledHere(gameId, seat)) {
+    text.textContent = 'Notifications are on. Your phone will tell you when it\'s your turn.';
+    button.hidden = true;
+  } else if (isIos() && !isHomeScreenApp()) {
+    text.textContent = 'To get turn notifications on iPhone: tap Share, then "Add to Home Screen", and open the game from the new icon.';
+    button.hidden = true;
+  } else if (!pushSupported()) {
+    text.textContent = 'This browser can\'t show notifications. Try Chrome, or Safari from the Home Screen.';
+    button.hidden = true;
+  } else {
+    text.textContent = 'Get a notification when it\'s your turn.';
+    button.hidden = false;
+  }
+  $('nudge').hidden = state().over || myTurn();
+  $('nudge').textContent = `Nudge ${opponent}`;
+}
+
 function render() {
   renderScores();
   renderBoard();
   renderRack();
   renderControls();
   renderLog();
+  renderAlerts();
+}
+
+function tellOpponent() {
+  if (!store.online || state().over) return;
+  notify(store.client, gameId, 'turn').catch((err) => console.warn('Turn notification failed:', err));
+}
+
+async function turnOnAlerts() {
+  const button = $('alerts-on');
+  button.disabled = true;
+  try {
+    await enablePush(store.client, gameId, seat, CONFIG.vapidPublicKey);
+    say('Notifications are on.', 'good');
+  } catch (err) {
+    say(err.message, 'warn');
+  } finally {
+    button.disabled = false;
+    renderAlerts();
+  }
+}
+
+async function nudge() {
+  const button = $('nudge');
+  button.disabled = true;
+  try {
+    const result = await notify(store.client, gameId, 'nudge');
+    if (result.ok) {
+      say(result.sent ? `Nudged ${nameOf(other(seat))}.` : `${nameOf(other(seat))} hasn't turned on notifications yet.`, result.sent ? 'good' : 'warn');
+    } else if (result.retryAt) {
+      const at = new Date(result.retryAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      say(`You can nudge once an hour after their turn starts. Try again after ${at}.`, 'warn');
+    } else {
+      say(`Couldn't send the nudge: ${result.error}`, 'warn');
+    }
+  } catch (err) {
+    say(`Couldn't send the nudge: ${err.message}`, 'warn');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ---------- actions ----------
@@ -195,6 +264,7 @@ async function commit(nextState, doneText) {
       ui.game = { state: nextState, version: result.version };
       resetTurn();
       say(doneText, 'good');
+      tellOpponent();
     }
   } catch (err) {
     say(`Couldn't save your move: ${err.message}. Check your connection and try again.`, 'warn');
@@ -438,6 +508,8 @@ function wireGame() {
     renderControls();
   });
   $('swap-go').addEventListener('click', swap);
+  $('alerts-on').addEventListener('click', turnOnAlerts);
+  $('nudge').addEventListener('click', nudge);
   $('copy-invite').addEventListener('click', (e) => copyField('invite-link', e.currentTarget));
   $('copy-own').addEventListener('click', (e) => copyField('own-link', e.currentTarget));
 }
@@ -473,6 +545,8 @@ async function startGame() {
     $('error-text').textContent = 'This game link doesn\'t match any game. Check the link, or start a new game.';
     return;
   }
+  try { localStorage.setItem(LAST_GAME_KEY, linkFor(seat)); } catch { /* only a convenience */ }
+  registerWorker().catch((err) => console.warn('Notifications unavailable:', err));
   wireGame();
   renderInvite();
   render();
@@ -483,6 +557,15 @@ async function startGame() {
 
 function startSetup() {
   $('setup').hidden = false;
+  let lastGame = null;
+  try { lastGame = localStorage.getItem(LAST_GAME_KEY); } catch { /* none saved */ }
+  if (lastGame) {
+    const back = document.createElement('a');
+    back.className = 'button primary';
+    back.href = lastGame;
+    back.textContent = 'Back to your current game';
+    $('setup').prepend(back);
+  }
   $('setup-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const me = $('name-me').value.trim().slice(0, 24) || 'Player 1';
