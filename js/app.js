@@ -29,6 +29,7 @@ const ui = {
   confirmPass: false,
   allowUnknown: false,
   busy: false,
+  suppressClick: false,
 };
 
 // ---------- helpers ----------
@@ -102,7 +103,7 @@ function renderBoard() {
     let inner = '';
     let cls = `cell ${PREMIUM_CLASSES[prem] || ''}`;
     if (tile) inner = tileHtml(tile.l, tile.b, last.has(i) ? 'recent' : '');
-    else if (placed) inner = tileHtml(placed.l, placed.b, 'pending');
+    else if (placed) { inner = tileHtml(placed.l, placed.b, 'pending'); cls += ' has-pending'; }
     else if (prem !== '.') inner = `<span class="prem">${PREMIUM_LABELS[prem]}</span>`;
     if (prem === '*') cls += ' centre';
     cells.push(`<button type="button" class="${cls}" data-i="${i}" aria-label="Row ${Math.floor(i / SIZE) + 1}, column ${(i % SIZE) + 1}">${inner}</button>`);
@@ -114,10 +115,10 @@ function renderRack() {
   syncOrder();
   const rack = state().racks[seat];
   const used = new Set(ui.pending.map((p) => p.rackIdx));
-  $('rack').innerHTML = ui.order.map((i) => {
-    if (used.has(i)) return '<span class="slot"></span>';
+  $('rack').innerHTML = ui.order.map((i, pos) => {
+    if (used.has(i)) return `<span class="slot" data-pos="${pos}"></span>`;
     const picked = ui.exchanging ? ui.swapPicks.has(i) : ui.selected === i;
-    return `<button type="button" class="rack-tile ${picked ? 'picked' : ''}" data-r="${i}" aria-pressed="${picked}">${tileHtml(rack[i], rack[i] === '?')}</button>`;
+    return `<button type="button" class="rack-tile ${picked ? 'picked' : ''}" data-r="${i}" data-pos="${pos}" aria-pressed="${picked}">${tileHtml(rack[i], rack[i] === '?')}</button>`;
   }).join('');
 }
 
@@ -250,34 +251,148 @@ function chooseBlankLetter() {
   });
 }
 
-async function onBoardTap(event) {
-  const cell = event.target.closest('.cell');
-  if (!cell || !myTurn() || ui.busy || ui.exchanging) return;
-  const i = Number(cell.dataset.i);
-  const r = Math.floor(i / SIZE);
-  const c = i % SIZE;
+const pendingAt = (i) => ui.pending.find((p) => idx(p.r, p.c) === i);
+const isFree = (i) => state().board[i] === null && !pendingAt(i);
 
-  const existing = ui.pending.find((p) => p.r === r && p.c === c);
-  if (existing) {
-    ui.pending = ui.pending.filter((p) => p !== existing);
-  } else if (ui.selected !== null && state().board[i] === null) {
-    const letter = state().racks[seat][ui.selected];
-    const blank = letter === '?';
-    const chosen = blank ? await chooseBlankLetter() : letter;
-    if (!chosen) return;
-    ui.pending = [...ui.pending, { r, c, l: chosen, b: blank, rackIdx: ui.selected }];
-    ui.selected = null;
-  } else {
-    return;
-  }
+function afterTileMove() {
   ui.allowUnknown = false;
   say('');
   render();
 }
 
+async function placeFromRack(rackIdx, i) {
+  const letter = state().racks[seat][rackIdx];
+  const blank = letter === '?';
+  const chosen = blank ? await chooseBlankLetter() : letter;
+  if (!chosen || !isFree(i)) return;
+  const r = Math.floor(i / SIZE);
+  ui.pending = [...ui.pending, { r, c: i % SIZE, l: chosen, b: blank, rackIdx }];
+  ui.selected = null;
+  afterTileMove();
+}
+
+async function onBoardTap(event) {
+  const cell = event.target.closest('.cell');
+  if (ui.suppressClick || !cell || !myTurn() || ui.busy || ui.exchanging) return;
+  const i = Number(cell.dataset.i);
+  const existing = pendingAt(i);
+  if (existing) {
+    ui.pending = ui.pending.filter((p) => p !== existing);
+    afterTileMove();
+  } else if (ui.selected !== null && isFree(i)) {
+    await placeFromRack(ui.selected, i);
+  }
+}
+
+// ---------- dragging (mouse and touch, via pointer events) ----------
+
+const DRAG_THRESHOLD_PX = 6;
+let drag = null; // { source, startX, startY, ghost, target, el, pointerId }
+
+function dragSourceFrom(target) {
+  if (!myTurn() || ui.busy || ui.exchanging) return null;
+  const rackTile = target.closest('.rack-tile');
+  if (rackTile) return { kind: 'rack', rackIdx: Number(rackTile.dataset.r), el: rackTile };
+  const cell = target.closest('.cell.has-pending');
+  if (cell) return { kind: 'pending', placed: pendingAt(Number(cell.dataset.i)), el: cell };
+  return null;
+}
+
+function startGhost(source, x, y) {
+  const rect = source.el.getBoundingClientRect();
+  const letter = source.kind === 'rack' ? state().racks[seat][source.rackIdx] : source.placed.l;
+  const blank = source.kind === 'rack' ? letter === '?' : source.placed.b;
+  const ghost = document.createElement('div');
+  ghost.className = 'ghost';
+  ghost.style.width = `${Math.max(rect.width, 44)}px`;
+  ghost.innerHTML = tileHtml(letter, blank);
+  document.body.append(ghost);
+  source.el.classList.add('dragging');
+  moveGhost(ghost, x, y);
+  return ghost;
+}
+
+function moveGhost(ghost, x, y) {
+  ghost.style.transform = `translate(${x}px, ${y}px) translate(-50%, -60%)`;
+}
+
+function dropTargetAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const cell = el.closest('.cell');
+  if (cell) return { kind: 'cell', i: Number(cell.dataset.i), el: cell };
+  const spot = el.closest('[data-pos]');
+  if (spot) return { kind: 'rack', pos: Number(spot.dataset.pos), el: spot };
+  if (el.closest('#rack')) return { kind: 'rack', pos: null, el: $('rack') };
+  return null;
+}
+
+function onPointerDown(event) {
+  if (event.button !== 0 || drag) return;
+  const source = dragSourceFrom(event.target);
+  if (!source) return;
+  drag = { source, startX: event.clientX, startY: event.clientY, ghost: null, target: null, pointerId: event.pointerId };
+}
+
+function onPointerMove(event) {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const { clientX: x, clientY: y } = event;
+  if (!drag.ghost) {
+    if (Math.hypot(x - drag.startX, y - drag.startY) < DRAG_THRESHOLD_PX) return;
+    drag.ghost = startGhost(drag.source, x, y);
+  }
+  event.preventDefault();
+  moveGhost(drag.ghost, x, y);
+  const target = dropTargetAt(x, y);
+  drag.target?.el.classList.remove('drop-target');
+  const usable = target && (target.kind === 'rack' || isFree(target.i));
+  drag.target = usable ? target : null;
+  drag.target?.el.classList.add('drop-target');
+}
+
+function endDrag() {
+  if (!drag) return;
+  drag.ghost?.remove();
+  drag.source.el.classList.remove('dragging');
+  drag.target?.el.classList.remove('drop-target');
+  drag = null;
+}
+
+function reorderRack(rackIdx, pos) {
+  const without = ui.order.filter((i) => i !== rackIdx);
+  const at = pos === null ? without.length : Math.min(pos, without.length);
+  ui.order = [...without.slice(0, at), rackIdx, ...without.slice(at)];
+}
+
+async function onPointerUp(event) {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const { source, target, ghost } = drag;
+  endDrag();
+  if (!ghost) return; // a plain tap: the click handlers take it from here
+
+  // Swallow the click the browser fires after a drag ends.
+  ui.suppressClick = true;
+  setTimeout(() => { ui.suppressClick = false; }, 0);
+  if (!target) return;
+
+  if (source.kind === 'rack' && target.kind === 'cell') {
+    await placeFromRack(source.rackIdx, target.i);
+  } else if (source.kind === 'rack') {
+    reorderRack(source.rackIdx, target.pos);
+    renderRack();
+  } else if (target.kind === 'cell') {
+    const r = Math.floor(target.i / SIZE);
+    ui.pending = ui.pending.map((p) => (p === source.placed ? { ...p, r, c: target.i % SIZE } : p));
+    afterTileMove();
+  } else {
+    ui.pending = ui.pending.filter((p) => p !== source.placed);
+    afterTileMove();
+  }
+}
+
 function onRackTap(event) {
   const btn = event.target.closest('.rack-tile');
-  if (!btn || !myTurn()) return;
+  if (ui.suppressClick || !btn || !myTurn()) return;
   const i = Number(btn.dataset.r);
   if (ui.exchanging) {
     const picks = new Set(ui.swapPicks);
@@ -306,6 +421,10 @@ async function copyField(fieldId, button) {
 function wireGame() {
   $('board').addEventListener('click', onBoardTap);
   $('rack').addEventListener('click', onRackTap);
+  document.addEventListener('pointerdown', onPointerDown);
+  document.addEventListener('pointermove', onPointerMove, { passive: false });
+  document.addEventListener('pointerup', onPointerUp);
+  document.addEventListener('pointercancel', endDrag);
   $('play').addEventListener('click', play);
   $('recall').addEventListener('click', () => { ui.pending = []; ui.allowUnknown = false; say(''); render(); });
   $('shuffle').addEventListener('click', () => { ui.order = shuffle(ui.order); renderRack(); });

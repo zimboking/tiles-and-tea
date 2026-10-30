@@ -12,7 +12,7 @@ A two-player word game with tiles, a 15×15 board and bonus squares. Each player
 
 - Open the site, enter both names, and tap **Start the game**.
 - Send the other player their link from **Game links**, and bookmark your own.
-- To make a move, tap a tile on your rack and then tap a square. Tap a placed tile to take it back.
+- To make a move, drag a tile from your rack onto the board, or tap a tile and then tap a square. Drag or tap a placed tile to take it back, and drag rack tiles to rearrange them.
 - Words that aren't in the word list need a second tap on **Play anyway**, so you can agree on names and slang between yourselves.
 
 ## Testing locally

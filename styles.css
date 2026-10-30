@@ -228,6 +228,25 @@ label { font-weight: 700; }
 }
 .controls .wide { grid-column: 1 / -1; min-height: 54px; font-size: 1.1rem; }
 
+/* ---------- dragging ---------- */
+.rack-tile, .cell.has-pending { touch-action: none; user-select: none; -webkit-user-select: none; }
+.dragging { opacity: 0.35; }
+.cell.drop-target { outline: 3px solid var(--pending); outline-offset: -1px; z-index: 1; }
+.rack .drop-target:not(.rack) { outline: 3px dashed var(--pending); outline-offset: 2px; }
+.ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  aspect-ratio: 1;
+  pointer-events: none;
+  z-index: 30;
+  container-type: inline-size;
+  filter: drop-shadow(0 8px 12px rgb(0 0 0 / 0.35));
+}
+.ghost .tile { border-radius: 6px; }
+.ghost .tile .ltr { font-size: 58cqw; }
+.ghost .tile .val { font-size: 24cqw; }
+
 /* ---------- links and log ---------- */
 .invite summary { font-weight: 700; cursor: pointer; }
 .invite[open] summary { margin-bottom: 4px; }
