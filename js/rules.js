@@ -103,7 +103,11 @@ function scoreRun(board, cells, newCells) {
     }
     sum += value;
   });
-  return { word: cells.map(([r, c]) => board[idx(r, c)].l).join(''), score: sum * wordMult };
+  return {
+    word: cells.map(([r, c]) => board[idx(r, c)].l).join(''),
+    score: sum * wordMult,
+    cells: cells.map(([r, c]) => idx(r, c)),
+  };
 }
 
 const fail = (error) => ({ ok: false, error });
@@ -173,7 +177,8 @@ function endScorelessTurn(state, seat, entry) {
   return next.passes >= MAX_SCORELESS_TURNS ? finish(next, null) : next;
 }
 
-export function applyPlay(state, seat, placements, evaluation) {
+// `missed` (optional): { words, score } of a better move the player could have made.
+export function applyPlay(state, seat, placements, evaluation, missed = null) {
   const board = state.board.slice();
   placements.forEach((p) => { board[idx(p.r, p.c)] = { l: p.l, b: p.b }; });
   const kept = removeTiles(state.racks[seat], placements.map((p) => (p.b ? '?' : p.l)));
@@ -190,19 +195,20 @@ export function applyPlay(state, seat, placements, evaluation) {
     log: [...state.log, {
       type: 'play', seat, score: evaluation.score, bingo: evaluation.bingo,
       words: evaluation.words.map((w) => w.word),
+      ...(missed && { missed }),
     }],
   };
   return rack.length === 0 && bag.length === 0 ? finish(next, seat) : next;
 }
 
-export function applyExchange(state, seat, letters, rand = Math.random) {
+export function applyExchange(state, seat, letters, missed = null, rand = Math.random) {
   if (state.bag.length < RACK_SIZE) throw new Error('Swapping needs at least 7 tiles in the bag.');
   const kept = removeTiles(state.racks[seat], letters);
   const { bag, rack } = draw(state.bag, kept);
   const withSwapped = { ...state, bag: shuffle(bag.concat(letters), rand), racks: { ...state.racks, [seat]: rack } };
-  return endScorelessTurn(withSwapped, seat, { type: 'exchange', seat, count: letters.length });
+  return endScorelessTurn(withSwapped, seat, { type: 'exchange', seat, count: letters.length, ...(missed && { missed }) });
 }
 
-export function applyPass(state, seat) {
-  return endScorelessTurn(state, seat, { type: 'pass', seat });
+export function applyPass(state, seat, missed = null) {
+  return endScorelessTurn(state, seat, { type: 'pass', seat, ...(missed && { missed }) });
 }

@@ -19,6 +19,8 @@ export function loadDictionary() {
   return loading;
 }
 
+export const dictionaryReady = () => words !== null;
+
 export function unknownWords(list) {
   return words ? list.filter((w) => !words.has(w)) : [];
 }

@@ -3,7 +3,8 @@ import {
   newGame, evaluateMove, applyPlay, applyPass, applyExchange,
 } from './rules.js';
 import { createStore } from './store.js';
-import { loadDictionary, unknownWords } from './dictionary.js';
+import { loadDictionary, unknownWords, dictionaryReady } from './dictionary.js';
+import { findBest, withTimeout } from './hints.js';
 import { CONFIG } from './config.js';
 import {
   pushSupported, isIos, isHomeScreenApp, pushEnabledHere, registerWorker, enablePush, notify,
@@ -14,6 +15,7 @@ const LAST_GAME_KEY = 'tiles-and-tea:last-game';
 const PREMIUM_LABELS = { T: 'TW', D: 'DW', t: 'TL', d: 'DL', '*': '★' };
 const PREMIUM_CLASSES = { T: 'tw', D: 'dw', t: 'tl', d: 'dl', '*': 'dw' };
 const CONFIRM_MS = 3000;
+const BEST_WAIT_MS = 5000;
 const LOG_LENGTH = 10;
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
@@ -32,7 +34,9 @@ const ui = {
   exchanging: false,
   swapPicks: new Set(),
   confirmPass: false,
-  allowUnknown: false,
+  check: { evaluation: null, bad: new Set(), good: new Set(), unknown: [] },
+  best: null,          // promise of the best move for this turn
+  bestFor: null,       // game version that search was for
   busy: false,
   suppressClick: false,
 };
@@ -69,9 +73,7 @@ function resetTurn() {
   ui.selected = null;
   ui.exchanging = false;
   ui.swapPicks = new Set();
-  ui.confirmPass = false;
-  ui.allowUnknown = false;
-}
+  ui.confirmPass = false;}
 
 // ---------- rendering ----------
 
@@ -111,6 +113,8 @@ function renderBoard() {
     else if (placed) { inner = tileHtml(placed.l, placed.b, 'pending'); cls += ' has-pending'; }
     else if (prem !== '.') inner = `<span class="prem">${PREMIUM_LABELS[prem]}</span>`;
     if (prem === '*') cls += ' centre';
+    if (ui.check.bad.has(i)) cls += ' word-bad';
+    else if (ui.check.good.has(i)) cls += ' word-good';
     cells.push(`<button type="button" class="${cls}" data-i="${i}" aria-label="Row ${Math.floor(i / SIZE) + 1}, column ${(i % SIZE) + 1}">${inner}</button>`);
   }
   $('board').innerHTML = cells.join('');
@@ -129,11 +133,13 @@ function renderRack() {
 
 function renderControls() {
   const turn = myTurn();
-  const evaluation = ui.pending.length ? evaluateMove(state().board, ui.pending) : null;
+  const { evaluation, unknown } = ui.check;
   const play = $('play');
   play.disabled = !turn || ui.busy || !evaluation?.ok;
-  play.textContent = evaluation?.ok ? `Play ${evaluation.words[0].word} for ${evaluation.score}` : 'Play';
-  if (ui.allowUnknown) play.textContent = 'Play anyway';
+  play.classList.toggle('risky', unknown.length > 0);
+  if (!evaluation?.ok) play.textContent = 'Play';
+  else if (unknown.length) play.textContent = `Play anyway for ${evaluation.score}`;
+  else play.textContent = `Play ${evaluation.words[0].word} for ${evaluation.score}`;
 
   $('recall').disabled = !ui.pending.length;
   $('pass').disabled = !turn || ui.busy || ui.exchanging;
@@ -146,6 +152,21 @@ function renderControls() {
   $('play').hidden = ui.exchanging;
 
   if (evaluation && !evaluation.ok) say(evaluation.error, 'warn');
+  else if (unknown.length) {
+    const verb = unknown.length === 1 ? "isn't" : "aren't";
+    say(`✗ ${unknown.join(', ')} ${verb} in the word list. Only play it if you both agree.`, 'bad');
+  }
+}
+
+// Checks the tiles placed so far: is the move legal, and which words are real?
+function checkPending() {
+  const evaluation = ui.pending.length ? evaluateMove(state().board, ui.pending) : null;
+  if (!evaluation?.ok || !dictionaryReady()) return { evaluation, bad: new Set(), good: new Set(), unknown: [] };
+  const unknown = unknownWords(evaluation.words.map((w) => w.word));
+  const isBad = (w) => unknown.includes(w.word);
+  const bad = new Set(evaluation.words.filter(isBad).flatMap((w) => w.cells));
+  const good = new Set(evaluation.words.filter((w) => !isBad(w)).flatMap((w) => w.cells).filter((i) => !bad.has(i)));
+  return { evaluation, bad, good, unknown };
 }
 
 function describe(entry) {
@@ -164,6 +185,13 @@ function renderLog() {
   list.replaceChildren(...items.map((entry) => {
     const li = document.createElement('li');
     li.textContent = describe(entry);
+    // Only the player who moved sees their missed move: it would reveal their tiles.
+    if (entry.missed && entry.seat === seat) {
+      const hint = document.createElement('span');
+      hint.className = 'missed';
+      hint.textContent = `Best possible: ${entry.missed.words[0]} for ${entry.missed.score}`;
+      li.append(hint);
+    }
     return li;
   }));
   $('log-empty').hidden = items.length > 0;
@@ -201,7 +229,25 @@ function renderAlerts() {
   $('nudge').textContent = `Nudge ${opponent}`;
 }
 
+function prepareBest() {
+  if (!myTurn() || ui.bestFor === ui.game.version) return;
+  ui.bestFor = ui.game.version;
+  ui.best = findBest(state().board, state().racks[seat]);
+}
+
+// Compares a move's score with the best one available this turn.
+async function compareWithBest(score) {
+  const best = await withTimeout(ui.best ?? Promise.resolve(null), BEST_WAIT_MS);
+  if (!best) return { missed: null, note: '' };
+  if (best.score > score) {
+    return { missed: { words: best.words, score: best.score }, note: ` Best possible was ${best.words[0]} for ${best.score}.` };
+  }
+  return { missed: null, note: ' That was the best move available!' };
+}
+
 function render() {
+  ui.check = checkPending();
+  prepareBest();
   renderScores();
   renderBoard();
   renderRack();
@@ -277,20 +323,31 @@ async function commit(nextState, doneText) {
 async function play() {
   const evaluation = evaluateMove(state().board, ui.pending);
   if (!evaluation.ok) return say(evaluation.error, 'warn');
-  const unknown = unknownWords(evaluation.words.map((w) => w.word));
-  if (unknown.length && !ui.allowUnknown) {
-    ui.allowUnknown = true;
-    renderControls();
-    return say(`${unknown.join(', ')} isn't in the word list. Agree it together, then tap "Play anyway" or recall your tiles.`, 'warn');
-  }
-  const next = applyPlay(state(), seat, ui.pending, evaluation);
-  await commit(next, `You scored ${evaluation.score}.`);
+  await holdWhile(async () => {
+    const { missed, note } = await compareWithBest(evaluation.score);
+    await commit(applyPlay(state(), seat, ui.pending, evaluation, missed), `You scored ${evaluation.score}.${note}`);
+  });
 }
 
 async function swap() {
   const rack = state().racks[seat];
   const letters = [...ui.swapPicks].map((i) => rack[i]);
-  await commit(applyExchange(state(), seat, letters), `Swapped ${letters.length} tiles.`);
+  await holdWhile(async () => {
+    const { missed, note } = await compareWithBest(0);
+    await commit(applyExchange(state(), seat, letters, missed), `Swapped ${letters.length} tiles.${note}`);
+  });
+}
+
+// Disables the controls while a move is checked and saved.
+async function holdWhile(work) {
+  ui.busy = true;
+  renderControls();
+  try {
+    await work();
+  } finally {
+    ui.busy = false;
+    renderControls();
+  }
 }
 
 async function pass() {
@@ -300,7 +357,10 @@ async function pass() {
     setTimeout(() => { ui.confirmPass = false; renderControls(); }, CONFIRM_MS);
     return;
   }
-  await commit(applyPass(state(), seat), 'You passed.');
+  await holdWhile(async () => {
+    const { missed, note } = await compareWithBest(0);
+    await commit(applyPass(state(), seat, missed), `You passed.${note}`);
+  });
 }
 
 function chooseBlankLetter() {
@@ -324,9 +384,7 @@ function chooseBlankLetter() {
 const pendingAt = (i) => ui.pending.find((p) => idx(p.r, p.c) === i);
 const isFree = (i) => state().board[i] === null && !pendingAt(i);
 
-function afterTileMove() {
-  ui.allowUnknown = false;
-  say('');
+function afterTileMove() {  say('');
   render();
 }
 
@@ -496,7 +554,7 @@ function wireGame() {
   document.addEventListener('pointerup', onPointerUp);
   document.addEventListener('pointercancel', endDrag);
   $('play').addEventListener('click', play);
-  $('recall').addEventListener('click', () => { ui.pending = []; ui.allowUnknown = false; say(''); render(); });
+  $('recall').addEventListener('click', () => { ui.pending = []; say(''); render(); });
   $('shuffle').addEventListener('click', () => { ui.order = shuffle(ui.order); renderRack(); });
   $('pass').addEventListener('click', pass);
   $('swap').addEventListener('click', () => {
@@ -552,7 +610,7 @@ async function startGame() {
   render();
   store.subscribe(gameId, receive);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-  loadDictionary();
+  loadDictionary().then(render);
 }
 
 function startSetup() {

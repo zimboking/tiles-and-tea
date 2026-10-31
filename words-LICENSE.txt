@@ -48,3 +48,5 @@ The initial information for Australian English comes from Benjamin Titze:
   purpose. It is provided "as is" without express or implied warranty.
 
 ---
+
+Two-letter words are limited to the Collins Scrabble Words two-letter list used in Australian play.
