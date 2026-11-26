@@ -1,13 +1,13 @@
 import {
   SIZE, PREMIUM, VALUES, RACK_SIZE, idx, other, shuffle,
-  newGame, evaluateMove, applyPlay, applyPass, applyExchange,
+  newGame, rematchStarter, evaluateMove, applyPlay, applyPass, applyExchange,
 } from './rules.js';
 import { createStore } from './store.js';
 import { loadDictionary, unknownWords, dictionaryReady } from './dictionary.js';
 import { findBest, withTimeout } from './hints.js';
 import { CONFIG } from './config.js';
 import {
-  pushSupported, isIos, isHomeScreenApp, pushEnabledHere, registerWorker, enablePush, notify,
+  pushSupported, isIos, isHomeScreenApp, pushEnabledHere, registerWorker, enablePush, carryOverPush, notify,
 } from './push.js';
 
 const LAST_GAME_KEY = 'tiles-and-tea:last-game';
@@ -254,6 +254,7 @@ function render() {
   renderControls();
   renderLog();
   renderAlerts();
+  renderGameOver();
 }
 
 function tellOpponent() {
@@ -568,6 +569,7 @@ function wireGame() {
   $('swap-go').addEventListener('click', swap);
   $('alerts-on').addEventListener('click', turnOnAlerts);
   $('nudge').addEventListener('click', nudge);
+  $('rematch').addEventListener('click', rematch);
   $('copy-invite').addEventListener('click', (e) => copyField('invite-link', e.currentTarget));
   $('copy-own').addEventListener('click', (e) => copyField('own-link', e.currentTarget));
 }
@@ -575,10 +577,54 @@ function wireGame() {
 function receive(incoming) {
   if (!incoming || incoming.version <= ui.game.version) return;
   const wasMyTurn = myTurn();
+  const hadRematch = Boolean(state().rematch);
   ui.game = incoming;
   if (wasMyTurn !== myTurn() || !myTurn()) resetTurn();
   if (myTurn() && !wasMyTurn) say(`${nameOf(other(seat))} has played. Your turn!`, 'good');
+  if (state().rematch && !hadRematch) say(`${nameOf(other(seat))} wants a rematch!`, 'good');
   render();
+}
+
+// ---------- rematch ----------
+
+const gameLink = (id) => `${location.pathname}?g=${id}&p=${seat}`;
+
+function renderGameOver() {
+  const s = state();
+  $('game-over').hidden = !s.over;
+  if (!s.over) return;
+  const [a, b] = [s.scores[1], s.scores[2]];
+  $('final').textContent = a === b
+    ? `It's a draw, ${a} all!`
+    : `${nameOf(a > b ? 1 : 2)} wins, ${Math.max(a, b)} to ${Math.min(a, b)}.`;
+  $('rematch').textContent = s.rematch ? 'Join the rematch' : 'Rematch';
+}
+
+// Starts a new game with the same players and seats, and links it from this one so both can find it.
+async function rematch() {
+  if (state().rematch) { location.href = gameLink(state().rematch); return; }
+  const button = $('rematch');
+  button.disabled = true;
+  button.textContent = 'Setting up the board…';
+  try {
+    const finished = state();
+    const newId = await store.create(newGame(finished.names, Math.random, rematchStarter(finished)));
+    const saved = await store.save(gameId, { ...finished, rematch: newId }, ui.game.version);
+    if (!saved.ok) {
+      // Both tapped at once: join whichever rematch was saved first.
+      const latest = await store.load(gameId);
+      if (latest?.state.rematch) { location.href = gameLink(latest.state.rematch); return; }
+      throw new Error('the game changed, please try again');
+    }
+    if (store.online) {
+      await notify(store.client, gameId, 'rematch', seat).catch((err) => console.warn('Rematch notification failed:', err));
+    }
+    location.href = gameLink(newId);
+  } catch (err) {
+    say(`Couldn't start the rematch: ${err.message}`, 'warn');
+    button.disabled = false;
+    renderGameOver();
+  }
 }
 
 async function refresh() {
@@ -604,7 +650,10 @@ async function startGame() {
     return;
   }
   try { localStorage.setItem(LAST_GAME_KEY, linkFor(seat)); } catch { /* only a convenience */ }
-  registerWorker().catch((err) => console.warn('Notifications unavailable:', err));
+  registerWorker()
+    .then(() => (store.online ? carryOverPush(store.client, gameId, seat) : null))
+    .then(() => renderAlerts())
+    .catch((err) => console.warn('Notifications unavailable:', err));
   wireGame();
   renderInvite();
   render();

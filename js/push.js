@@ -35,7 +35,18 @@ export async function enablePush(client, gameId, seat, vapidPublicKey) {
   const registration = await navigator.serviceWorker.ready;
   const subscription = (await registration.pushManager.getSubscription())
     || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(vapidPublicKey) });
+  await saveSubscription(client, gameId, seat, subscription);
+}
 
+// A device that already allows notifications joins a new game (such as a rematch) without asking again.
+export async function carryOverPush(client, gameId, seat) {
+  if (!pushSupported() || Notification.permission !== 'granted' || pushEnabledHere(gameId, seat)) return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) await saveSubscription(client, gameId, seat, subscription);
+}
+
+async function saveSubscription(client, gameId, seat, subscription) {
   const { error } = await client.from('push_subscriptions').insert({
     endpoint: subscription.endpoint,
     game_id: gameId,
@@ -47,9 +58,9 @@ export async function enablePush(client, gameId, seat, vapidPublicKey) {
   try { localStorage.setItem(ENABLED_KEY(gameId, seat), '1'); } catch { /* the button just shows again */ }
 }
 
-// kind: 'turn' after a move, or 'nudge'. Resolves { ok, retryAt? }.
-export async function notify(client, gameId, kind) {
-  const { data, error } = await client.functions.invoke('notify', { body: { gameId, kind } });
+// kind: 'turn' after a move, 'nudge', or 'rematch' (with fromSeat). Resolves { ok, retryAt? }.
+export async function notify(client, gameId, kind, fromSeat = null) {
+  const { data, error } = await client.functions.invoke('notify', { body: { gameId, kind, fromSeat } });
   if (!error) return { ok: true, sent: data?.sent ?? 0 };
   const details = await error.context?.json?.().catch(() => null);
   return { ok: false, retryAt: details?.retryAt ?? null, error: details?.error ?? error.message };

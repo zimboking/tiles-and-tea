@@ -57,7 +57,15 @@ function removeTiles(rack, letters) {
 
 export const rackValue = (rack) => rack.reduce((sum, l) => sum + VALUES[l], 0);
 
-export function newGame(names, rand = Math.random) {
+// In a rematch the loser goes first; after a draw, whoever went second last time.
+export function rematchStarter(state) {
+  const [a, b] = [state.scores[1], state.scores[2]];
+  if (a !== b) return a < b ? 1 : 2;
+  const firstMover = state.log.find((e) => e.seat)?.seat ?? 1;
+  return other(firstMover);
+}
+
+export function newGame(names, rand = Math.random, firstTurn = 1) {
   const fullBag = shuffle(Object.entries(COUNTS).flatMap(([l, n]) => Array(n).fill(l)), rand);
   const first = draw(fullBag, []);
   const second = draw(first.bag, []);
@@ -67,7 +75,7 @@ export function newGame(names, rand = Math.random) {
     racks: { 1: first.rack, 2: second.rack },
     scores: { 1: 0, 2: 0 },
     names: { 1: names[1], 2: names[2] },
-    turn: 1,
+    turn: firstTurn,
     passes: 0,
     lastMove: [],
     log: [],

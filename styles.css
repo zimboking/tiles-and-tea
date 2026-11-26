@@ -261,6 +261,11 @@ label { font-weight: 700; }
 .log .missed { display: block; font-size: 0.9rem; color: var(--muted); }
 .log .missed::before { content: "💡 "; }
 
+/* ---------- game over ---------- */
+.game-over { border: 2px solid var(--accent); text-align: center; }
+.game-over .final { font-family: var(--font-tile); font-size: 1.4rem; text-wrap: balance; }
+.game-over .wide { min-height: 54px; font-size: 1.1rem; }
+
 /* ---------- notifications ---------- */
 .alerts-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
 .alerts-row p { flex: 1 1 14rem; min-width: 0; }
