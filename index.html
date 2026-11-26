@@ -32,6 +32,8 @@
         <input id="name-me" maxlength="24" autocomplete="given-name" required>
         <label for="name-them">The other player's name</label>
         <input id="name-them" maxlength="24" required>
+        <label class="check"><input id="challenge-mode" type="checkbox"> Challenge mode</label>
+        <p class="hint">No warnings about words before they're played. Instead, the other player can challenge a word they doubt: if it's not in the word list, it comes off the board; if it is, the challenger loses their turn.</p>
         <button id="setup-go" class="primary" type="submit">Start the game</button>
         <p id="setup-error" class="error-text" role="alert"></p>
       </form>
@@ -66,15 +68,23 @@
       <div class="tray">
         <div id="rack" class="rack" aria-label="Your tiles"></div>
         <p id="msg" class="msg" role="status" aria-live="polite"></p>
+        <button id="challenge" class="challenge" type="button" hidden>Challenge</button>
         <div class="controls">
           <button id="play" class="primary wide" type="button">Play</button>
           <button id="swap-go" class="primary wide" type="button" hidden>Swap</button>
-          <button id="recall" type="button">Recall</button>
+          <button id="undo" type="button" title="Take back the last tile you placed">Undo</button>
+          <button id="recall" type="button" title="Take back all the tiles you placed">Recall</button>
           <button id="shuffle" type="button">Shuffle</button>
           <button id="swap" type="button">Swap tiles</button>
           <button id="pass" type="button">Pass</button>
         </div>
       </div>
+
+      <details id="tiles-left" class="panel tiles-left">
+        <summary>Tiles left <span id="unseen-count" class="count"></span></summary>
+        <p id="unseen-note" class="muted"></p>
+        <div id="unseen-grid" class="unseen-grid"></div>
+      </details>
 
       <section id="alerts" class="panel alerts" hidden>
         <div class="alerts-row">
@@ -92,9 +102,16 @@
         <div class="copy-row"><input id="own-link" readonly><button id="copy-own" type="button">Copy</button></div>
       </details>
 
+      <details class="panel settings">
+        <summary>Settings</summary>
+        <label class="check"><input id="big-text" type="checkbox"> Larger tiles and text on this phone</label>
+        <p id="rules-note" class="muted"></p>
+      </details>
+
       <section id="history" class="panel history" hidden>
         <h2>Match history</h2>
         <p id="history-summary" class="history-summary"></p>
+        <div id="bests" class="bests"></div>
         <ol id="history-list" class="history-list" reversed></ol>
       </section>
 
@@ -105,6 +122,15 @@
       </section>
     </section>
   </main>
+
+  <div id="define" class="picker" hidden role="dialog" aria-modal="true" aria-labelledby="define-word">
+    <div class="picker-card define-card">
+      <h2 id="define-word"></h2>
+      <div id="define-body" class="define-body" aria-live="polite"></div>
+      <a id="define-more" class="more" target="_blank" rel="noopener noreferrer">Look it up on Wiktionary</a>
+      <button id="define-close" type="button">Close</button>
+    </div>
+  </div>
 
   <div id="picker" class="picker" hidden role="dialog" aria-modal="true" aria-labelledby="picker-title">
     <div class="picker-card">

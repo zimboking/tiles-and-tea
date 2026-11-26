@@ -23,7 +23,7 @@ export const VALUES = {
   A: 1, B: 3, C: 3, D: 2, E: 1, F: 4, G: 2, H: 4, I: 1, J: 8, K: 5, L: 1, M: 3,
   N: 1, O: 1, P: 3, Q: 10, R: 1, S: 1, T: 1, U: 1, V: 4, W: 4, X: 8, Y: 4, Z: 10, '?': 0,
 };
-const COUNTS = {
+export const COUNTS = {
   A: 9, B: 2, C: 2, D: 4, E: 12, F: 2, G: 3, H: 2, I: 9, J: 1, K: 1, L: 4, M: 2,
   N: 6, O: 8, P: 2, Q: 1, R: 6, S: 4, T: 6, U: 4, V: 2, W: 2, X: 1, Y: 2, Z: 1, '?': 2,
 };
@@ -71,10 +71,29 @@ export function winnerOf(scores) {
   return scores[1] > scores[2] ? 1 : 2;
 }
 
+// Each seat's highest-scoring move in a game log: { [seat]: { score, words } }.
+export function bestPlays(log) {
+  return log.reduce((best, e) => {
+    if (e.type !== 'play' || e.withdrawn || e.score <= (best[e.seat]?.score ?? -1)) return best;
+    return { ...best, [e.seat]: { score: e.score, words: e.words } };
+  }, {});
+}
+
 // One line of match history for a finished game.
 export const historyEntry = (id, state, endedAt) => ({
-  id, scores: { 1: state.scores[1], 2: state.scores[2] }, endedAt,
+  id, scores: { 1: state.scores[1], 2: state.scores[2] }, endedAt, best: bestPlays(state.log),
 });
+
+// Tiles this seat hasn't seen yet (in the bag or on the other rack): { letter: count }.
+export function unseenTiles(state, seat) {
+  const left = { ...COUNTS };
+  const seen = [
+    ...state.board.filter(Boolean).map((t) => (t.b ? '?' : t.l)),
+    ...state.racks[seat],
+  ];
+  seen.forEach((l) => { left[l] = Math.max(0, (left[l] ?? 0) - 1); });
+  return left;
+}
 
 // Wins per seat and draws across a list of history entries.
 export function tally(history) {
@@ -196,11 +215,15 @@ function finish(state, outSeat) {
     scores[1] -= leftover[1];
     scores[2] -= leftover[2];
   }
-  return { ...state, scores, over: true, log: [...state.log, { type: 'end', seat: outSeat || null }] };
+  return {
+    ...state, scores, over: true, challengeable: null, log: [...state.log, { type: 'end', seat: outSeat || null }],
+  };
 }
 
 function endScorelessTurn(state, seat, entry) {
-  const next = { ...state, turn: other(seat), passes: state.passes + 1, lastMove: [], log: [...state.log, entry] };
+  const next = {
+    ...state, turn: other(seat), passes: state.passes + 1, lastMove: [], challengeable: null, log: [...state.log, entry],
+  };
   return next.passes >= MAX_SCORELESS_TURNS ? finish(next, null) : next;
 }
 
@@ -219,6 +242,11 @@ export function applyPlay(state, seat, placements, evaluation, missed = null) {
     turn: other(seat),
     passes: 0,
     lastMove: placements.map((p) => idx(p.r, p.c)),
+    challengeable: state.challenge ? {
+      seat, score: evaluation.score, words: evaluation.words.map((w) => w.word),
+      cells: placements.map((p) => idx(p.r, p.c)),
+      rackBefore: state.racks[seat], bagBefore: state.bag, passesBefore: state.passes, logIndex: state.log.length,
+    } : null,
     log: [...state.log, {
       type: 'play', seat, score: evaluation.score, bingo: evaluation.bingo,
       words: evaluation.words.map((w) => w.word),
@@ -238,4 +266,30 @@ export function applyExchange(state, seat, letters, missed = null, rand = Math.r
 
 export function applyPass(state, seat, missed = null) {
   return endScorelessTurn(state, seat, { type: 'pass', seat, ...(missed && { missed }) });
+}
+
+// Challenge mode: the player whose turn it is challenges the move just played.
+// upheld (a word isn't in the list): the move comes off the board, its tiles go back, and the
+//   challenger keeps their turn. Otherwise the challenger loses their turn.
+export function resolveChallenge(state, challenger, upheld) {
+  const c = state.challengeable;
+  if (!c || c.seat !== other(challenger) || state.turn !== challenger) throw new Error('There is no move to challenge.');
+  const entry = { type: 'challenge', seat: challenger, against: c.seat, words: c.words, upheld };
+  if (!upheld) return endScorelessTurn(state, challenger, entry);
+
+  const board = state.board.slice();
+  c.cells.forEach((i) => { board[i] = null; });
+  const log = state.log.map((e, i) => (i === c.logIndex ? { ...e, withdrawn: true } : e));
+  const next = {
+    ...state,
+    board,
+    bag: c.bagBefore,
+    racks: { ...state.racks, [c.seat]: c.rackBefore },
+    scores: { ...state.scores, [c.seat]: state.scores[c.seat] - c.score },
+    passes: c.passesBefore + 1,
+    lastMove: [],
+    challengeable: null,
+    log: [...log, entry],
+  };
+  return next.passes >= MAX_SCORELESS_TURNS ? finish(next, null) : next;
 }

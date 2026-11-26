@@ -227,9 +227,11 @@ label { font-weight: 700; }
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
+.controls > button { grid-column: span 2; padding-inline: 6px; }
+.controls > #swap, .controls > #pass { grid-column: span 3; }
 .controls .wide { grid-column: 1 / -1; min-height: 54px; font-size: 1.1rem; }
 
 /* ---------- dragging ---------- */
@@ -299,7 +301,6 @@ label { font-weight: 700; }
 .picker-grid button { font-family: var(--font-tile); font-size: 1.2rem; padding: 0; background: var(--tile); color: var(--tile-ink); border-color: var(--tile-edge); }
 
 @media (max-width: 420px) {
-  .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .board-frame { padding: 4px; }
   .board { gap: 1px; }
 }
@@ -318,3 +319,71 @@ label { font-weight: 700; }
 .history-list .won { font-weight: 700; }
 .history-list .won::after { content: " 🏆"; }
 .history-list .when { margin-left: auto; color: var(--muted); font-size: 0.9rem; }
+
+/* Setup and settings checkboxes */
+label.check { display: flex; gap: 10px; align-items: center; font-weight: 700; cursor: pointer; min-height: 46px; }
+label.check input { width: 24px; height: 24px; min-height: 0; accent-color: var(--accent); flex: none; }
+.hint { font-size: 0.9rem; color: var(--muted); }
+.settings summary, .tiles-left summary { font-weight: 700; cursor: pointer; }
+.settings[open] summary, .tiles-left[open] summary { margin-bottom: 4px; }
+
+/* Challenge mode */
+.challenge {
+  width: 100%;
+  min-height: 52px;
+  background: color-mix(in srgb, var(--risky) 22%, var(--panel));
+  border: 2px solid var(--risky);
+  color: var(--ink);
+}
+.challenge:hover:not(:disabled) { background: color-mix(in srgb, var(--risky) 35%, var(--panel)); }
+.log li.withdrawn { color: var(--muted); }
+.log li.withdrawn .word-link { text-decoration: line-through; }
+
+/* The other player's latest move glows for a few seconds */
+@keyframes fresh-glow {
+  0%, 100% { box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 2px var(--pending); }
+  50% { box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 4px var(--pending), 0 0 14px 4px var(--pending); }
+}
+.tile.fresh { animation: fresh-glow 900ms ease-in-out 3; z-index: 2; }
+@media (prefers-reduced-motion: reduce) { .tile.fresh { animation: none; } }
+
+/* Tiles left */
+.count { color: var(--muted); font-weight: 400; }
+.unseen-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px; }
+.unseen {
+  display: grid; place-items: center; padding: 4px 0 2px; border-radius: 6px;
+  background: var(--tile); color: var(--tile-ink); box-shadow: inset 0 -2px 0 var(--tile-edge);
+}
+.unseen .u-ltr { font-family: var(--font-tile); font-weight: 700; font-size: 1.2rem; line-height: 1.1; }
+.unseen .u-n { font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.unseen.gone { opacity: 0.3; box-shadow: none; }
+
+/* Tappable words and the definition card */
+.word-link {
+  display: inline; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none;
+  color: inherit; font: inherit; font-weight: 700; cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.word-link:hover:not(:disabled) { background: none; color: var(--accent); }
+.define-card h2 { letter-spacing: 0.08em; }
+.meanings { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; }
+.meanings em { color: var(--muted); }
+.define-card .more { color: var(--accent); font-weight: 700; }
+
+/* Personal bests */
+.bests { display: grid; gap: 4px; }
+.bests h3 { margin: 4px 0 0; font-family: var(--font-tile); font-size: 1.05rem; }
+
+/* Larger tiles and text */
+html.big body { font-size: 20px; }
+html.big .wrap { padding-left: max(4px, env(safe-area-inset-left, 0px)); padding-right: max(4px, env(safe-area-inset-right, 0px)); max-width: 760px; }
+html.big .board-frame { padding: 3px; }
+html.big .board { gap: 1px; }
+html.big .tile .ltr { font-size: calc(100cqw / 15 * 0.74); }
+html.big .tile .val { font-size: calc(100cqw / 15 * 0.22); right: 4%; bottom: 0; }
+html.big .prem { font-size: calc(100cqw / 15 * 0.36); }
+html.big .rack { max-width: 560px; gap: 4px; }
+html.big .rack-tile .tile .ltr { font-size: calc(100cqw / 7 * 0.6); }
+html.big .rack-tile .tile .val { font-size: calc(100cqw / 7 * 0.22); }
+html.big button:not(.cell, .rack-tile, .word-link), html.big .button { min-height: 52px; }
+html.big .player .score { font-size: 2.1rem; }

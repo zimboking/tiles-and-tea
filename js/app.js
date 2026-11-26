@@ -1,7 +1,10 @@
 import {
   SIZE, PREMIUM, VALUES, RACK_SIZE, idx, other, shuffle,
-  newGame, rematchStarter, evaluateMove, applyPlay, applyPass, applyExchange,
+  newGame, rematchStarter, evaluateMove, applyPlay, applyPass, applyExchange, resolveChallenge,
 } from './rules.js';
+import { renderTilesLeft } from './tracker.js';
+import { showDefinition } from './define.js';
+import { setUpBigText } from './settings.js';
 import { createStore } from './store.js';
 import { renderHistory, historyForRematch } from './history.js';
 import { loadDictionary, unknownWords, dictionaryReady } from './dictionary.js';
@@ -12,6 +15,8 @@ import {
 } from './push.js';
 
 const LAST_GAME_KEY = 'tiles-and-tea:last-game';
+const SEEN_KEY = 'tiles-and-tea:seen:';
+const FRESH_MS = 4000;
 
 const PREMIUM_LABELS = { T: 'TW', D: 'DW', t: 'TL', d: 'DL', '*': '★' };
 const PREMIUM_CLASSES = { T: 'tw', D: 'dw', t: 'tl', d: 'dl', '*': 'dw' };
@@ -35,6 +40,8 @@ const ui = {
   exchanging: false,
   swapPicks: new Set(),
   confirmPass: false,
+  confirmChallenge: false,
+  fresh: false,        // highlight the other player's latest move
   check: { evaluation: null, bad: new Set(), good: new Set(), unknown: [] },
   best: null,          // promise of the best move for this turn
   bestFor: null,       // game version that search was for
@@ -74,7 +81,9 @@ function resetTurn() {
   ui.selected = null;
   ui.exchanging = false;
   ui.swapPicks = new Set();
-  ui.confirmPass = false;}
+  ui.confirmPass = false;
+  ui.confirmChallenge = false;
+}
 
 // ---------- rendering ----------
 
@@ -110,7 +119,7 @@ function renderBoard() {
     const prem = PREMIUM[i];
     let inner = '';
     let cls = `cell ${PREMIUM_CLASSES[prem] || ''}`;
-    if (tile) inner = tileHtml(tile.l, tile.b, last.has(i) ? 'recent' : '');
+    if (tile) inner = tileHtml(tile.l, tile.b, last.has(i) ? `recent${ui.fresh ? ' fresh' : ''}` : '');
     else if (placed) { inner = tileHtml(placed.l, placed.b, 'pending'); cls += ' has-pending'; }
     else if (prem !== '.') inner = `<span class="prem">${PREMIUM_LABELS[prem]}</span>`;
     if (prem === '*') cls += ' centre';
@@ -138,11 +147,13 @@ function renderControls() {
   const play = $('play');
   play.disabled = !turn || ui.busy || !evaluation?.ok;
   play.classList.toggle('risky', unknown.length > 0);
+  renderChallenge();
   if (!evaluation?.ok) play.textContent = 'Play';
   else if (unknown.length) play.textContent = `Play anyway for ${evaluation.score}`;
   else play.textContent = `Play ${evaluation.words[0].word} for ${evaluation.score}`;
 
   $('recall').disabled = !ui.pending.length;
+  $('undo').disabled = !ui.pending.length;
   $('pass').disabled = !turn || ui.busy || ui.exchanging;
   $('pass').textContent = ui.confirmPass ? 'Tap again to pass' : 'Pass';
   $('swap').disabled = !turn || ui.busy || state().bag.length < RACK_SIZE || ui.pending.length > 0;
@@ -162,7 +173,7 @@ function renderControls() {
 // Checks the tiles placed so far: is the move legal, and which words are real?
 function checkPending() {
   const evaluation = ui.pending.length ? evaluateMove(state().board, ui.pending) : null;
-  if (!evaluation?.ok || !dictionaryReady()) return { evaluation, bad: new Set(), good: new Set(), unknown: [] };
+  if (!evaluation?.ok || !dictionaryReady() || state().challenge) return { evaluation, bad: new Set(), good: new Set(), unknown: [] };
   const unknown = unknownWords(evaluation.words.map((w) => w.word));
   const isBad = (w) => unknown.includes(w.word);
   const bad = new Set(evaluation.words.filter(isBad).flatMap((w) => w.cells));
@@ -170,10 +181,19 @@ function checkPending() {
   return { evaluation, bad, good, unknown };
 }
 
+// A log line as text pieces and { word } pieces; words become tappable for a definition.
 function describe(entry) {
   const who = nameOf(entry.seat);
+  const words = (list) => list.flatMap((w, i) => (i ? [', ', { word: w }] : [{ word: w }]));
   if (entry.type === 'play') {
-    return `${who} played ${entry.words.join(', ')} for ${entry.score}${entry.bingo ? ' (all 7 tiles!)' : ''}`;
+    const tail = entry.withdrawn ? ' (taken back after a challenge)' : (entry.bingo ? ' (all 7 tiles!)' : '');
+    return [`${who} played `, ...words(entry.words), ` for ${entry.score}${tail}`];
+  }
+  if (entry.type === 'challenge') {
+    const outcome = entry.upheld
+      ? `: not in the word list, so it came off the board and ${nameOf(entry.against)} lost the turn`
+      : `: it's in the word list, so ${who} lost the turn`;
+    return [`${who} challenged `, ...words(entry.words), outcome];
   }
   if (entry.type === 'exchange') return `${who} swapped ${entry.count} tile${entry.count === 1 ? '' : 's'}`;
   if (entry.type === 'pass') return `${who} passed`;
@@ -185,17 +205,41 @@ function renderLog() {
   const list = $('log');
   list.replaceChildren(...items.map((entry) => {
     const li = document.createElement('li');
-    li.textContent = describe(entry);
+    const parts = describe(entry);
+    li.append(...(Array.isArray(parts) ? parts : [parts]).map(logPiece));
+    if (entry.withdrawn) li.className = 'withdrawn';
     // Only the player who moved sees their missed move: it would reveal their tiles.
     if (entry.missed && entry.seat === seat) {
       const hint = document.createElement('span');
       hint.className = 'missed';
-      hint.textContent = `Best possible: ${entry.missed.words[0]} for ${entry.missed.score}`;
+      hint.append('Best possible: ', logPiece({ word: entry.missed.words[0] }), ` for ${entry.missed.score}`);
       li.append(hint);
     }
     return li;
   }));
   $('log-empty').hidden = items.length > 0;
+}
+
+function logPiece(piece) {
+  if (typeof piece === 'string') return piece;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'word-link';
+  button.dataset.word = piece.word;
+  button.textContent = piece.word;
+  button.title = `What does ${piece.word} mean?`;
+  return button;
+}
+
+function renderChallenge() {
+  const c = state().challengeable;
+  const button = $('challenge');
+  const can = Boolean(state().challenge && myTurn() && c && c.seat === other(seat));
+  button.hidden = !can;
+  if (!can) return;
+  button.disabled = ui.busy || ui.pending.length > 0;
+  const words = c.words.join(', ');
+  button.textContent = ui.confirmChallenge ? `Tap again to challenge ${words}` : `Challenge ${words}`;
 }
 
 function renderInvite() {
@@ -257,6 +301,10 @@ function render() {
   renderAlerts();
   renderGameOver();
   renderHistory({ state: state(), gameId, nameOf, $ });
+  renderTilesLeft({ state: state(), seat, opponentName: nameOf(other(seat)), $ });
+  $('rules-note').textContent = state().challenge
+    ? "This game uses challenge mode: no word warnings, and you can challenge the other player's last move."
+    : 'Words not in the word list are flagged before you play them.';
 }
 
 function tellOpponent() {
@@ -300,7 +348,7 @@ async function nudge() {
 
 // ---------- actions ----------
 
-async function commit(nextState, doneText) {
+async function commit(nextState, doneText, { notifyOpponent = true } = {}) {
   ui.busy = true;
   renderControls();
   try {
@@ -313,7 +361,7 @@ async function commit(nextState, doneText) {
       ui.game = { state: nextState, version: result.version };
       resetTurn();
       say(doneText, 'good');
-      tellOpponent();
+      if (notifyOpponent) tellOpponent();
     }
   } catch (err) {
     say(`Couldn't save your move: ${err.message}. Check your connection and try again.`, 'warn');
@@ -363,6 +411,28 @@ async function pass() {
   await holdWhile(async () => {
     const { missed, note } = await compareWithBest(0);
     await commit(applyPass(state(), seat, missed), `You passed.${note}`);
+  });
+}
+
+async function challenge() {
+  const c = state().challengeable;
+  if (!c) return;
+  if (!ui.confirmChallenge) {
+    ui.confirmChallenge = true;
+    renderControls();
+    setTimeout(() => { ui.confirmChallenge = false; renderControls(); }, CONFIRM_MS);
+    return;
+  }
+  await holdWhile(async () => {
+    await loadDictionary();
+    if (!dictionaryReady()) { say("Couldn't load the word list to check. Try again in a moment.", 'warn'); return; }
+    const bad = unknownWords(c.words);
+    const upheld = bad.length > 0;
+    const text = upheld
+      ? `Challenge won! ${bad.join(', ')} isn't in the word list, so it's off the board. Still your turn.`
+      : `${c.words.join(', ')} is in the word list, so you lose this turn.`;
+    // A won challenge keeps the turn here, so there's no one to notify.
+    await commit(resolveChallenge(state(), seat, upheld), text, { notifyOpponent: !upheld });
   });
 }
 
@@ -558,6 +628,12 @@ function wireGame() {
   document.addEventListener('pointercancel', endDrag);
   $('play').addEventListener('click', play);
   $('recall').addEventListener('click', () => { ui.pending = []; say(''); render(); });
+  $('undo').addEventListener('click', () => { ui.pending = ui.pending.slice(0, -1); say(''); render(); });
+  $('challenge').addEventListener('click', challenge);
+  $('game').addEventListener('click', (e) => {
+    const link = e.target.closest('.word-link');
+    if (link) showDefinition(link.dataset.word);
+  });
   $('shuffle').addEventListener('click', () => { ui.order = shuffle(ui.order); renderRack(); });
   $('pass').addEventListener('click', pass);
   $('swap').addEventListener('click', () => {
@@ -576,13 +652,30 @@ function wireGame() {
   $('copy-own').addEventListener('click', (e) => copyField('own-link', e.currentTarget));
 }
 
+// Highlights the other player's latest move the first time this phone sees it.
+function markFresh() {
+  const key = `${SEEN_KEY}${gameId}:${seat}`;
+  let seen = 0;
+  try { seen = Number(localStorage.getItem(key)) || 0; } catch { /* treat as unseen */ }
+  const last = state().log[state().log.length - 1];
+  ui.fresh = ui.game.version > seen && last?.type === 'play' && last.seat !== seat && state().lastMove.length > 0;
+  try { localStorage.setItem(key, String(ui.game.version)); } catch { /* only a convenience */ }
+  if (ui.fresh) setTimeout(() => { ui.fresh = false; }, FRESH_MS);
+}
+
 function receive(incoming) {
   if (!incoming || incoming.version <= ui.game.version) return;
   const wasMyTurn = myTurn();
   const hadRematch = Boolean(state().rematch);
   ui.game = incoming;
   if (wasMyTurn !== myTurn() || !myTurn()) resetTurn();
-  if (myTurn() && !wasMyTurn) say(`${nameOf(other(seat))} has played. Your turn!`, 'good');
+  const last = state().log[state().log.length - 1];
+  if (last?.type === 'challenge' && last.seat !== seat) {
+    say(last.upheld
+      ? `${nameOf(last.seat)} challenged ${last.words.join(', ')} and won: it's off the board.`
+      : `${nameOf(last.seat)} challenged ${last.words.join(', ')}, but it stands. Your turn!`, last.upheld ? 'warn' : 'good');
+  } else if (myTurn() && !wasMyTurn) say(`${nameOf(other(seat))} has played. Your turn!`, 'good');
+  markFresh();
   if (state().rematch && !hadRematch) say(`${nameOf(other(seat))} wants a rematch!`, 'good');
   render();
 }
@@ -611,7 +704,9 @@ async function rematch() {
   try {
     const finished = state();
     const history = await historyForRematch(store, gameId, finished);
-    const fresh = { ...newGame(finished.names, Math.random, rematchStarter(finished)), history };
+    const fresh = {
+      ...newGame(finished.names, Math.random, rematchStarter(finished)), history, challenge: Boolean(finished.challenge),
+    };
     const newId = await store.create(fresh);
     const saved = await store.save(gameId, { ...finished, rematch: newId }, ui.game.version);
     if (!saved.ok) {
@@ -658,8 +753,10 @@ async function startGame() {
     .then(() => (store.online ? carryOverPush(store.client, gameId, seat) : null))
     .then(() => renderAlerts())
     .catch((err) => console.warn('Notifications unavailable:', err));
+  setUpBigText($('big-text'));
   wireGame();
   renderInvite();
+  markFresh();
   render();
   store.subscribe(gameId, receive);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
@@ -667,6 +764,7 @@ async function startGame() {
 }
 
 function startSetup() {
+  setUpBigText(null);
   $('setup').hidden = false;
   let lastGame = null;
   try { lastGame = localStorage.getItem(LAST_GAME_KEY); } catch { /* none saved */ }
@@ -685,7 +783,7 @@ function startSetup() {
     button.disabled = true;
     button.textContent = 'Setting up the board…';
     try {
-      const id = await store.create(newGame({ 1: me, 2: them }));
+      const id = await store.create({ ...newGame({ 1: me, 2: them }), challenge: $('challenge-mode').checked });
       location.href = `${location.pathname}?g=${id}&p=1&new=1`;
     } catch (err) {
       button.disabled = false;

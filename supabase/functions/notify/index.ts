@@ -42,6 +42,7 @@ function message(state: GameState, kind: string) {
   if (last?.type === 'play') body = `${name} played ${last.words?.join(', ')} for ${last.score}.`;
   if (last?.type === 'pass') body = `${name} passed.`;
   if (last?.type === 'exchange') body = `${name} swapped ${last.count} tiles.`;
+  if (last?.type === 'challenge') body = `${name} challenged ${last.words?.join(', ')}, but it stands.`;
   return { title: 'Your turn!', body };
 }
 
