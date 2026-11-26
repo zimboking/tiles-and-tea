@@ -41,6 +41,13 @@ function supabaseStore({ supabaseUrl, supabaseKey }) {
       check(error);
       return data.length ? { ok: true, version: version + 1 } : { ok: false };
     },
+    // The finished game whose rematch is `id`, if any: { id, state, endedAt }.
+    async findPrevious(id) {
+      const { data, error } = await client.from(TABLE).select('id, state, updated_at')
+        .eq('state->>rematch', id).limit(1).maybeSingle();
+      check(error);
+      return data && { id: data.id, state: data.state, endedAt: data.updated_at };
+    },
     subscribe(id, onChange) {
       const channel = client.channel(`game-${id}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE, filter: `id=eq.${id}` },
@@ -75,6 +82,15 @@ function localStore() {
       if (!current || current.version !== version) return { ok: false };
       write(id, { state, version: version + 1 });
       return { ok: true, version: version + 1 };
+    },
+    async findPrevious(id) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k.startsWith(key(''))) continue;
+        const record = read(k.slice(key('').length));
+        if (record?.state?.rematch === id) return { id: k.slice(key('').length), state: record.state, endedAt: null };
+      }
+      return null;
     },
     subscribe(id, onChange) {
       const handler = (event) => { if (event.data === id) { const r = read(id); if (r) onChange(r); } };

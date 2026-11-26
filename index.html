@@ -45,16 +45,17 @@
 
     <section id="game" hidden>
       <div class="scoreboard">
-        <div id="player-1" class="player"><span class="name"></span><span class="score">0</span></div>
+        <div id="player-1" class="player"><span class="name"></span><span class="score">0</span><span class="wins" hidden></span></div>
         <div class="middle">
           <p id="turn" class="turn"></p>
           <p id="bag-count" class="bag"></p>
         </div>
-        <div id="player-2" class="player"><span class="name"></span><span class="score">0</span></div>
+        <div id="player-2" class="player"><span class="name"></span><span class="score">0</span><span class="wins" hidden></span></div>
       </div>
 
       <section id="game-over" class="panel game-over" hidden>
         <p id="final" class="final"></p>
+        <p id="series" class="series" hidden></p>
         <button id="rematch" class="primary wide" type="button">Rematch</button>
       </section>
 
@@ -90,6 +91,12 @@
         <label for="own-link">Your own link (bookmark it to come back)</label>
         <div class="copy-row"><input id="own-link" readonly><button id="copy-own" type="button">Copy</button></div>
       </details>
+
+      <section id="history" class="panel history" hidden>
+        <h2>Match history</h2>
+        <p id="history-summary" class="history-summary"></p>
+        <ol id="history-list" class="history-list" reversed></ol>
+      </section>
 
       <section class="panel">
         <h2>Moves</h2>

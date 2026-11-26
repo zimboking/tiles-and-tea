@@ -65,6 +65,25 @@ export function rematchStarter(state) {
   return other(firstMover);
 }
 
+// Seat that won a finished game, or 0 for a draw.
+export function winnerOf(scores) {
+  if (scores[1] === scores[2]) return 0;
+  return scores[1] > scores[2] ? 1 : 2;
+}
+
+// One line of match history for a finished game.
+export const historyEntry = (id, state, endedAt) => ({
+  id, scores: { 1: state.scores[1], 2: state.scores[2] }, endedAt,
+});
+
+// Wins per seat and draws across a list of history entries.
+export function tally(history) {
+  return history.reduce((t, game) => {
+    const w = winnerOf(game.scores);
+    return w ? { ...t, [w]: t[w] + 1 } : { ...t, draws: t.draws + 1 };
+  }, { 1: 0, 2: 0, draws: 0 });
+}
+
 export function newGame(names, rand = Math.random, firstTurn = 1) {
   const fullBag = shuffle(Object.entries(COUNTS).flatMap(([l, n]) => Array(n).fill(l)), rand);
   const first = draw(fullBag, []);

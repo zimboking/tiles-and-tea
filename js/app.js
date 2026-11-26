@@ -3,6 +3,7 @@ import {
   newGame, rematchStarter, evaluateMove, applyPlay, applyPass, applyExchange,
 } from './rules.js';
 import { createStore } from './store.js';
+import { renderHistory, historyForRematch } from './history.js';
 import { loadDictionary, unknownWords, dictionaryReady } from './dictionary.js';
 import { findBest, withTimeout } from './hints.js';
 import { CONFIG } from './config.js';
@@ -255,6 +256,7 @@ function render() {
   renderLog();
   renderAlerts();
   renderGameOver();
+  renderHistory({ state: state(), gameId, nameOf, $ });
 }
 
 function tellOpponent() {
@@ -608,7 +610,9 @@ async function rematch() {
   button.textContent = 'Setting up the board…';
   try {
     const finished = state();
-    const newId = await store.create(newGame(finished.names, Math.random, rematchStarter(finished)));
+    const history = await historyForRematch(store, gameId, finished);
+    const fresh = { ...newGame(finished.names, Math.random, rematchStarter(finished)), history };
+    const newId = await store.create(fresh);
     const saved = await store.save(gameId, { ...finished, rematch: newId }, ui.game.version);
     if (!saved.ok) {
       // Both tapped at once: join whichever rematch was saved first.
